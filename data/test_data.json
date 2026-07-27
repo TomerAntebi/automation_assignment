@@ -1,0 +1,7 @@
+{
+  "base_url": "https://www.ebay.com",
+  "search_query": "shoes",
+  "max_price": 220,
+  "items_limit": 5,
+  "currency": "ILS"
+}

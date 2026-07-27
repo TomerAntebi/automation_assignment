@@ -1,0 +1,104 @@
+from pathlib import Path
+from typing import Any
+
+import allure
+import pytest
+from playwright.sync_api import Page
+
+from pages.cart_page import CartPage
+from pages.home_page import HomePage
+from pages.product_page import ProductPage
+from pages.search_results_page import SearchResultsPage
+
+
+def add_items_to_cart(
+    page: Page,
+    product_page: ProductPage,
+    product_urls: list[str],
+) -> None:
+    search_page_url = page.url
+
+    for index, product_url in enumerate(product_urls, start=1):
+        with allure.step(f"Add product {index} to cart"):
+            try:
+                product_page.open_product(product_url)
+                product_page.select_available_variants()
+                product_page.add_to_cart()
+            except AssertionError as error:
+                if "unavailable" not in str(error).lower():
+                    raise
+
+                allure.attach(
+                    str(error),
+                    name=f"product_{index}_not_added",
+                    attachment_type=allure.attachment_type.TEXT,
+                )
+                page.goto(search_page_url, wait_until="domcontentloaded")
+                continue
+
+            screenshot_path = product_page.save_screenshot(f"added_product_{index}")
+
+            allure.attach.file(
+                str(screenshot_path),
+                name=f"added_product_{index}",
+                attachment_type=allure.attachment_type.PNG,
+            )
+
+            page.goto(search_page_url, wait_until="domcontentloaded")
+
+
+@allure.feature("eBay shopping")
+@allure.story("Search and add products under budget")
+def test_ebay_purchase_flow(
+    page: Page,
+    test_data: dict[str, Any],
+) -> None:
+    base_url = str(test_data["base_url"])
+    search_query = str(test_data["search_query"])
+    max_price = float(test_data["max_price"])
+    items_limit = int(test_data["items_limit"])
+    currency = str(test_data["currency"])
+
+    home_page = HomePage(page)
+    search_results_page = SearchResultsPage(page)
+    product_page = ProductPage(page)
+    cart_page = CartPage(page)
+
+    with allure.step("Open eBay"):
+        home_page.navigate(base_url)
+
+    with allure.step("Continue as guest"):
+        home_page.authenticate_as_guest()
+
+    with allure.step(
+        f"Search for {search_query} and collect products under {max_price} {currency}"
+    ):
+        product_urls = search_results_page.search_items_by_name_under_price(
+            query=search_query,
+            max_price=max_price,
+            limit=items_limit,
+        )
+
+    if not product_urls:
+        pytest.skip("No matching products were available for the cart scenario")
+
+    add_items_to_cart(
+        page=page,
+        product_page=product_page,
+        product_urls=product_urls,
+    )
+
+    with allure.step("Validate cart total"):
+        cart_page.assert_cart_total_not_exceeds(
+            budget_per_item=max_price,
+            items_count=len(product_urls),
+        )
+
+    with allure.step("Attach cart screenshot"):
+        cart_screenshot = Path("screenshots/cart_summary.png")
+
+        allure.attach.file(
+            str(cart_screenshot),
+            name="cart_summary",
+            attachment_type=allure.attachment_type.PNG,
+        )

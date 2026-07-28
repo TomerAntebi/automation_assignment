@@ -8,6 +8,9 @@ INVALID_TEXT_PATTERN = re.compile(
     r"select|choose|please|sold out|unavailable",
     re.IGNORECASE,
 )
+INVALID_OPTION_VALUES = {"", "-1", "0"}
+VARIANT_DROPDOWN_BUTTON_SELECTOR = "button.listbox-button__control:visible"
+VARIANT_OPTION_SELECTOR = "[role='option']:visible"
 
 
 class VariantHandler:
@@ -21,31 +24,26 @@ class VariantHandler:
             if not variant_group.is_visible():
                 continue
 
-            self._select_from_listbox(variant_group)
+            dropdown_button = variant_group.locator(
+                VARIANT_DROPDOWN_BUTTON_SELECTOR
+            ).first
 
-    def _select_from_listbox(self, variant_group: Locator) -> bool:
-        listbox_button = variant_group.locator(
-            "button.listbox-button__control:visible"
-        ).first
+            if not dropdown_button.is_visible():
+                continue
 
-        if not listbox_button.is_visible():
-            return False
+            if "select" not in dropdown_button.inner_text().lower():
+                continue
 
-        if "select" not in listbox_button.inner_text().lower():
-            return False
+            dropdown_button.click()
 
-        listbox_button.click()
+            options = variant_group.locator(VARIANT_OPTION_SELECTOR)
+            expect(options.first).to_be_visible()
+            valid_options = self._get_valid_options(options)
 
-        options = variant_group.locator("[role='option']:visible")
-        expect(options.first).to_be_visible()
-        valid_options = self._get_valid_options(options)
+            if not valid_options:
+                continue
 
-        if not valid_options:
-            return False
-
-        random.choice(valid_options).click()
-
-        return True
+            random.choice(valid_options).click()
 
     @staticmethod
     def _get_valid_options(options: Locator) -> list[Locator]:
@@ -56,26 +54,15 @@ class VariantHandler:
             option_text = option.text_content() or ""
             option_value = option.get_attribute("value")
 
-            if VariantHandler._is_disabled(option):
+            if option.is_disabled() or option.get_attribute("aria-disabled") == "true":
                 continue
 
-            if VariantHandler._is_invalid_text(option_text):
+            if INVALID_TEXT_PATTERN.search(option_text):
                 continue
 
-            if option_value in {"", "-1", "0"}:
+            if option_value in INVALID_OPTION_VALUES:
                 continue
 
             valid_options.append(option)
 
         return valid_options
-
-    @staticmethod
-    def _is_invalid_text(text: str) -> bool:
-        return bool(INVALID_TEXT_PATTERN.search(text))
-
-    @staticmethod
-    def _is_disabled(option: Locator) -> bool:
-        return bool(
-            option.is_disabled()
-            or option.get_attribute("aria-disabled") == "true"
-        )

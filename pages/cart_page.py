@@ -4,14 +4,17 @@ from pages.base_page import BasePage
 from utils.price_parser import PriceParser
 
 
+CART_HEADING_SELECTOR = "h1.cart-title"
+CART_ITEM_TOTAL_SELECTOR = "[data-test-id='ITEM_TOTAL']"
+
 class CartPage(BasePage):
     CART_URL = "https://cart.ebay.com/"
 
     def __init__(self, page: Page) -> None:
         super().__init__(page)
 
-        self.cart_heading = page.get_by_role("heading", name="Cart").first
-        self.cart_item_total = page.locator("[data-test-id='ITEM_TOTAL']").first
+        self.cart_heading = page.locator(CART_HEADING_SELECTOR).first
+        self.cart_item_total = page.locator(CART_ITEM_TOTAL_SELECTOR).first
 
     def open_cart(self) -> None:
         self.navigate(self.CART_URL)

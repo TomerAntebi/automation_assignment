@@ -22,10 +22,6 @@ def test_data() -> dict[str, Any]:
 def browser_context(browser: Browser) -> BrowserContext:
     context = browser.new_context(
         locale="en-US",
-        timezone_id="America/New_York",  
-        extra_http_headers={
-            "Accept-Language": "en-US,en;q=0.9"  
-        },
         viewport={
             "width": 1440,
             "height": 900,

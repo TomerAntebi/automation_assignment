@@ -3,24 +3,23 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from playwright.sync_api import Page, expect
 
 from pages.base_page import BasePage
+from pages.base_page import SEARCH_INPUT_SELECTOR, SEARCH_BUTTON_SELECTOR
 from utils.search_results_collector import SearchResultsCollector
-
 
 BUY_IT_NOW_FILTER_PARAMETER = "LH_BIN"
 BUY_IT_NOW_FILTER_VALUE = "1"
 MAXIMUM_PRICE_FILTER_PARAMETER = "_udhi"
 SEARCH_FILTER_PARAMETERS = {MAXIMUM_PRICE_FILTER_PARAMETER,BUY_IT_NOW_FILTER_PARAMETER}
+RESULT_ITEMS_SELECTOR = "xpath=//li[contains(@class, 's-item') or contains(@class, 's-card')]"
 
 
 class SearchResultsPage(BasePage):
     def __init__(self, page: Page) -> None:
         super().__init__(page)
 
-        self.search_input = page.locator("input[name='_nkw']").first
-        self.search_button = page.locator("#gh-search-btn, input#gh-btn").first
-        self.result_items = page.locator(
-            "xpath=//li[contains(@class, 's-item') or contains(@class, 's-card')]"
-        )
+        self.search_input = page.locator(SEARCH_INPUT_SELECTOR).first
+        self.search_button = page.locator(SEARCH_BUTTON_SELECTOR).first
+        self.result_items = page.locator(RESULT_ITEMS_SELECTOR)
         self.next_page = page.locator("a.pagination__next").first
         self.search_results_collector = SearchResultsCollector(
             page=page,

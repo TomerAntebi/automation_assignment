@@ -1,14 +1,14 @@
 from playwright.sync_api import Page, expect
 
 from pages.base_page import BasePage
-
+from pages.base_page import SEARCH_INPUT_SELECTOR, SEARCH_BUTTON_SELECTOR
 
 class HomePage(BasePage):
     def __init__(self, page: Page) -> None:
         super().__init__(page)
 
-        self.search_input = page.locator("input[name='_nkw']")
-        self.search_button = page.locator("#gh-search-btn, input#gh-btn").first
+        self.search_input = page.locator(SEARCH_INPUT_SELECTOR)
+        self.search_button = page.locator(SEARCH_BUTTON_SELECTOR).first
 
     def authenticate_as_guest(self) -> None:
         expect(self.search_input).to_be_visible()

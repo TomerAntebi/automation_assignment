@@ -7,7 +7,7 @@ env/
 
 .pytest_cache/
 
-reports/
+reports
 
 screenshots/*
 !screenshots/.gitkeep

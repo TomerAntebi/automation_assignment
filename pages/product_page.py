@@ -10,18 +10,15 @@ from pages.base_page import BasePage
 from utils.variant_handler import VariantHandler
 
 
-ADD_TO_CART_BUTTON_SELECTOR = (
-    "#atcBtn_btn_1, "
-    "a[role='button']:has-text('Add to cart'), "
-    "button:has-text('Add to cart')"
-)
+ADD_TO_CART_BUTTON_SELECTOR = "#atcBtn_btn_1"
+VARIANT_GROUP_SELECTOR = ".vim.x-sku"
 
 
 class ProductPage(BasePage):
     def __init__(self, page: Page) -> None:
         super().__init__(page)
 
-        self.variant_handler = VariantHandler(page.locator(".vim.x-sku"))
+        self.variant_handler = VariantHandler(page.locator(VARIANT_GROUP_SELECTOR))
         self.add_to_cart_button = page.locator(ADD_TO_CART_BUTTON_SELECTOR).first
         self.unavailable_message = page.get_by_text(
             re.compile(r"out of stock|unavailable|sold out", re.IGNORECASE)

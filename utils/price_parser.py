@@ -1,6 +1,4 @@
 import re
-
-
 class PriceParser:
     @staticmethod
     def parse(price_text: str) -> float:

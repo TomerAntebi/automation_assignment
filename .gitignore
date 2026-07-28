@@ -7,7 +7,7 @@ env/
 
 .pytest_cache/
 
-reports/allure-results/
+reports/
 
 screenshots/*
 !screenshots/.gitkeep

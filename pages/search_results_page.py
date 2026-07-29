@@ -1,91 +1,66 @@
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import urlencode
 
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from pages.base_page import BasePage
-from pages.base_page import SEARCH_INPUT_SELECTOR, SEARCH_BUTTON_SELECTOR
 from utils.search_results_collector import SearchResultsCollector
 
-BUY_IT_NOW_FILTER_PARAMETER = "LH_BIN"
-BUY_IT_NOW_FILTER_VALUE = "1"
-MAXIMUM_PRICE_FILTER_PARAMETER = "_udhi"
-SEARCH_FILTER_PARAMETERS = {MAXIMUM_PRICE_FILTER_PARAMETER,BUY_IT_NOW_FILTER_PARAMETER}
+
 RESULT_ITEMS_SELECTOR = "xpath=//li[contains(@class, 's-item') or contains(@class, 's-card')]"
+NEXT_PAGE_SELECTOR = "xpath=//a[contains(@class, 'pagination__next')]"
 
 
 class SearchResultsPage(BasePage):
     def __init__(self, page: Page) -> None:
         super().__init__(page)
 
-        self.search_input = page.locator(SEARCH_INPUT_SELECTOR).first
-        self.search_button = page.locator(SEARCH_BUTTON_SELECTOR).first
-        self.result_items = page.locator(RESULT_ITEMS_SELECTOR)
-        self.next_page = page.locator("a.pagination__next").first
-        self.search_results_collector = SearchResultsCollector(
-            page=page,
-            result_items=self.result_items,
-            next_page=self.next_page,
-        )
+        self.next_page = page.locator(NEXT_PAGE_SELECTOR).first
+        self.results_collector = SearchResultsCollector(result_items=RESULT_ITEMS_SELECTOR)
 
-    def search_items_by_name_under_price(
-        self,
-        query: str,
-        max_price: float,
-        limit: int = 5,
-    ) -> list[str]:
-        if limit <= 0:
+    def search_items_by_name_under_price(self, query: str, max_price: float, limit: int = 5) -> list[str]:
+        if limit <= 0 or max_price <= 0:
             return []
 
-        self._search_by_query(query)
-        self._confirm_query_context(query)
-        self.page.goto(
-            self.build_query_url(max_price),
-            wait_until="domcontentloaded",
-        )
+        url = self._build_search_url(query, max_price)
 
-        return self.search_results_collector.collect_urls(
-            max_price=max_price,
-            limit=limit,
-        )
+        self.page.goto(url, wait_until="domcontentloaded")
 
-    def _search_by_query(self, query: str) -> None:
-        expect(self.search_input).to_be_visible()
-        expect(self.search_button).to_be_visible()
+        product_urls: list[str] = []
+        seen_product_urls: set[str] = set()
+        visited_urls: set[str] = set()
 
-        self.search_input.fill(query)
-        self.search_button.click()
-        self.page.wait_for_load_state("domcontentloaded")
+        while len(product_urls) < limit and self.page.url not in visited_urls:
+            visited_urls.add(self.page.url)
+            self.results_collector.collect_current_page(product_urls, seen_product_urls, max_price, limit)
+            if len(product_urls) >= limit or not self._go_to_next_page():
+                break
 
-    def _confirm_query_context(self, query: str) -> None:
-        if not self.search_input.is_visible():
-            return
+        return product_urls
 
-        current_query = self.search_input.input_value()
+    def _build_search_url(self, query: str, max_price: float) -> str:
+        params = {
+            "_nkw": query,
+            "_udhi": f"{max_price:g}",  # max price
+            "LH_BIN": "1",              # buy it now only
+            "_currency": "USD",         # force USD (best effort)
+        }
 
-        if query.lower() not in current_query.lower():
-            raise AssertionError(
-                f"Current search query '{current_query}' does not match '{query}'"
+        return f"{self.base_url}/sch/i.html?{urlencode(params)}"
+
+    def _go_to_next_page(self) -> bool:
+        if not self.next_page.is_visible():
+            return False
+
+        previous_url = self.page.url
+        self.next_page.click()
+
+        try:
+            self.page.wait_for_function(
+                "previousUrl => window.location.href !== previousUrl",
+                arg=previous_url,
+                timeout=10000,
             )
+        except PlaywrightTimeoutError:
+            return False
 
-    def build_query_url(self, max_price: float) -> str:
-        parsed_url = urlparse(self.page.url)
-        existing_parameters = parse_qsl(
-            parsed_url.query,
-            keep_blank_values=True,
-        )
-
-        filtered_parameters = [
-            parameter
-            for parameter in existing_parameters
-            if parameter[0] not in SEARCH_FILTER_PARAMETERS
-        ]
-        filtered_parameters.extend(
-            [
-                (MAXIMUM_PRICE_FILTER_PARAMETER, f"{max_price:g}"),
-                (BUY_IT_NOW_FILTER_PARAMETER, BUY_IT_NOW_FILTER_VALUE),
-            ]
-        )
-
-        return urlunparse(
-            parsed_url._replace(query=urlencode(filtered_parameters))
-        )
+        return True

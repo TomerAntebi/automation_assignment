@@ -1,7 +1,7 @@
 import re
 from urllib.parse import urlparse
 
-from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import Locator
 
 from utils.price_parser import PriceParser
 
@@ -12,117 +12,70 @@ ITEM_ID_PATTERN = re.compile(r"/itm/(?:[^/]+/)?(\d{9,})")
 
 
 class SearchResultsCollector:
-    def __init__(self, page: Page, result_items: Locator, next_page: Locator) -> None:
-        self.page = page
+    def __init__(self, result_items: Locator) -> None:
         self.result_items = result_items
-        self.next_page = next_page
 
-    def collect_urls(self, max_price: float, limit: int) -> list[str]:
-        collected_urls: list[str] = []
-        collected_set: set[str] = set()
-        visited_pages: set[str] = set()
-
-        while len(collected_urls) < limit:
-            current_page_url = self.page.url
-            if current_page_url in visited_pages:
-                break
-
-            visited_pages.add(current_page_url)
-            self._collect_urls_from_current_page(limit, collected_urls, collected_set)
-            if len(collected_urls) >= limit:
-                break
-            if not self._go_to_next_page():
-                break
-
-        return collected_urls
-
-    def _collect_urls_from_current_page(
-        self, limit: int, collected_urls: list[str], collected_set: set[str]
+    def collect_current_page(
+        self,
+        urls: list[str],
+        seen: set[str],
+        max_price: float,
+        limit: int,
     ) -> None:
-        for index in range(self.result_items.count()):
-            item = self.result_items.nth(index)
-            if self._is_sponsored_item(item.inner_text()):
-                continue
-            item_price = self._extract_item_price(item)
-            if item_price is None:
-                continue
-            product_url = self._extract_product_url(item)
-            if product_url is None:
-                continue
-            valid_product_url = self._normalize_valid_product_url(product_url)
-            if valid_product_url is None:
-                continue
-            if valid_product_url in collected_set:
+        count = self.result_items.count()
+
+        for i in range(count):
+            item = self.result_items.nth(i)
+
+            product = self._extract_product(item, max_price)
+            if not product or product in seen:
                 continue
 
-            collected_urls.append(valid_product_url)
-            collected_set.add(valid_product_url)
+            urls.append(product)
+            seen.add(product)
 
-            if len(collected_urls) >= limit:
-                break
+            if len(urls) >= limit:
+                return
 
-    def _go_to_next_page(self) -> bool:
-        if not self.next_page.is_visible():
-            return False
-        if not self.next_page.is_enabled():
-            return False
-        if self.next_page.get_attribute("aria-disabled") == "true":
-            return False
-
-        previous_url = self.page.url
-        self.next_page.click()
-        try:
-            self.page.wait_for_function(
-                "previousUrl => window.location.href !== previousUrl",
-                arg=previous_url,
-                timeout=10000,
-            )
-        except PlaywrightTimeoutError:
-            return False
-
-        self.page.wait_for_load_state("domcontentloaded")
-        return self.page.url != previous_url
-
-    @staticmethod
-    def _is_sponsored_item(item_text: str) -> bool:
-        return "sponsored" in item_text.lower()
-
-    @staticmethod
-    def _extract_item_price(item: Locator) -> float | None:
-        price_locator = item.locator(PRICE_XPATH).first
-        if not price_locator.is_visible():
+    def _extract_product(self, item: Locator, max_price: float) -> str | None:
+        text = item.text_content().lower() or ""
+        if "sponsored" in text:
             return None
-        price_text = price_locator.text_content()
-        if not price_text:
+
+        price = self._get_price(item)
+        if price is None or price > max_price:
             return None
+
+        return self._get_valid_product_url(item)
+
+
+    def _get_price(self, item: Locator) -> float | None:
+        locator = item.locator(PRICE_XPATH).first
+        text = locator.text_content()
+
+        if not text:
+            return None
+
         try:
-            return PriceParser.parse(price_text)
+            return PriceParser.parse(text)
         except ValueError:
             return None
 
-    @staticmethod
-    def _extract_product_url(item: Locator) -> str | None:
-        link_locator = item.locator(PRODUCT_LINK_XPATH).first
-        if not link_locator.is_visible():
+    def _get_valid_product_url(self, item: Locator) -> str | None:
+        locator = item.locator(PRODUCT_LINK_XPATH).first
+        url = locator.get_attribute("href")
+
+        if not url:
             return None
-        return link_locator.get_attribute("href")
 
-    @staticmethod
-    def _normalize_valid_product_url(product_url: str) -> str | None:
-        parsed_url = urlparse(product_url)
-        normalized_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+        parsed = urlparse(url)
 
-        if not SearchResultsCollector._is_valid_product_url(normalized_url):
+        if not (
+            parsed.scheme in {"http", "https"}
+            and parsed.netloc.endswith("ebay.com")
+            and "/itm/" in parsed.path
+            and ITEM_ID_PATTERN.search(parsed.path)
+        ):
             return None
-        return normalized_url
 
-    @staticmethod
-    def _is_valid_product_url(product_url: str) -> bool:
-        parsed_url = urlparse(product_url)
-        host = parsed_url.netloc.lower()
-        return bool(
-            parsed_url.scheme in {"http", "https"}
-            and (host == "ebay.com" or host.endswith(".ebay.com"))
-            and "/itm/" in parsed_url.path
-            and ITEM_ID_PATTERN.search(parsed_url.path)
-        )
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"

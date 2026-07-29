@@ -9,9 +9,8 @@ from playwright.sync_api import (
 from pages.base_page import BasePage
 from utils.variant_handler import VariantHandler
 
-
-ADD_TO_CART_BUTTON_SELECTOR = "#atcBtn_btn_1"
-VARIANT_GROUP_SELECTOR = ".vim.x-sku"
+ADD_TO_CART_BUTTON_SELECTOR = "xpath=//*[@id='atcBtn_btn_1']"
+VARIANT_GROUP_SELECTOR = "xpath=//*[contains(@class, 'vim') and contains(@class, 'x-sku')]"
 
 
 class ProductPage(BasePage):

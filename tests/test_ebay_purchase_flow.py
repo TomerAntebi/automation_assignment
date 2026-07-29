@@ -1,4 +1,5 @@
 import logging
+import time 
 from pathlib import Path
 from typing import Any
 
@@ -15,11 +16,7 @@ from pages.search_results_page import SearchResultsPage
 logger = logging.getLogger(__name__)
 
 
-def add_items_to_cart(
-    page: Page,
-    product_page: ProductPage,
-    product_urls: list[str],
-) -> None:
+def add_items_to_cart(page: Page, product_page: ProductPage, product_urls: list[str]) -> None:
     search_page_url = page.url
 
     for index, product_url in enumerate(product_urls, start=1):
@@ -57,10 +54,7 @@ def add_items_to_cart(
 
 @allure.feature("eBay shopping")
 @allure.story("Search and add products under budget")
-def test_ebay_purchase_flow(
-    page: Page,
-    test_data: dict[str, Any],
-) -> None:
+def test_ebay_purchase_flow(page: Page, test_data: dict[str, Any]) -> None:
     base_url = str(test_data["base_url"])
     search_query = str(test_data["search_query"])
     max_price = float(test_data["max_price"])
@@ -80,43 +74,21 @@ def test_ebay_purchase_flow(
         home_page.authenticate_as_guest()
 
     with allure.step(f"Search for {search_query} and collect products under {max_price}"):
-        logger.info(
-            "Searching query='%s', max_price=%s, limit=%s",
-            search_query,
-            max_price,
-            items_limit,
-        )
-        product_urls = search_results_page.search_items_by_name_under_price(
-            query=search_query,
-            max_price=max_price,
-            limit=items_limit,
-        )
+        logger.info("Searching query='%s', max_price=%s, limit=%s", search_query, max_price, items_limit)
+        product_urls = search_results_page.search_items_by_name_under_price(query=search_query, max_price=max_price, limit=items_limit)
         logger.info("Collected %s product URLs", len(product_urls))
 
     if not product_urls:
-        skip_reason = (
-            f"No matching products found for query='{search_query}', "
-            f"max_price={max_price}, limit={items_limit}"
-        )
+        skip_reason = f"No matching products found for query='{search_query}', max_price={max_price}, limit={items_limit}"
         logger.warning(skip_reason)
         pytest.skip(skip_reason)
 
-    add_items_to_cart(
-        page=page,
-        product_page=product_page,
-        product_urls=product_urls,
-    )
+    add_items_to_cart(page=page, product_page=product_page, product_urls=product_urls)
+    time.sleep(10)
 
     with allure.step("Validate cart total"):
-        logger.info(
-            "Validating cart total with budget_per_item=%s, items_count=%s",
-            max_price,
-            len(product_urls),
-        )
-        cart_page.assert_cart_total_not_exceeds(
-            budget_per_item=max_price,
-            items_count=len(product_urls),
-        )
+        logger.info("Validating cart total with budget_per_item=%s, items_count=%s", max_price, len(product_urls))
+        cart_page.assert_cart_total_not_exceeds(budget_per_item=max_price, items_count=len(product_urls))
 
     with allure.step("Attach cart screenshot"):
         cart_screenshot = Path("screenshots/cart_summary.png")

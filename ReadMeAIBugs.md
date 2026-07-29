@@ -205,31 +205,18 @@ search_input.fill("shoes")
 from playwright.sync_api import expect, sync_playwright
 
 
-def test_search() -> None:
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+def test_search_functionality() -> None:
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
 
-        try:
-            page = browser.new_page()
-            page.goto(
-                "https://www.ebay.com",
-                wait_until="domcontentloaded",
-            )
+        page.goto("https://example.com")
+        page.fill("#search", "shoes")
+        page.locator("button").click()
 
-            search_input = page.locator("input[name='_nkw']")
-            expect(search_input).to_be_visible()
-            search_input.fill("shoes")
+        results = page.locator(".result-item")
+        expect(results.first).to_be_visible()
+        assert results.count() > 0
 
-            search_button = page.locator("#gh-search-btn, input#gh-btn").first
-            search_button.click()
-
-            results = page.locator(
-                "xpath=//li[contains(@class, 's-item') or contains(@class, 's-card')]"
-            )
-
-            expect(results.first).to_be_visible()
-            assert results.count() > 0
-
-        finally:
-            browser.close()
+        browser.close()
 ```

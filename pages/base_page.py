@@ -3,8 +3,8 @@ from pathlib import Path
 from playwright.sync_api import Page
 
 BASE_URL = "https://www.ebay.com"
-SEARCH_INPUT_SELECTOR = "input[name='_nkw']"
-SEARCH_BUTTON_SELECTOR = "#gh-search-btn, input#gh-btn"
+
+
 class BasePage:
     def __init__(self, page: Page) -> None:
         self.page = page

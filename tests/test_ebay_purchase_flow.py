@@ -5,12 +5,11 @@ from typing import Any
 
 import allure
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from pages.cart_page import CartPage
-from pages.home_page import HomePage
 from pages.product_page import ProductPage
-from pages.search_results_page import SearchResultsPage
+from pages.products_page import ProductsPage
 
 
 logger = logging.getLogger(__name__)
@@ -27,13 +26,14 @@ def add_items_to_cart(page: Page, product_page: ProductPage, product_urls: list[
                 product_page.open_product(product_url)
                 product_page.select_variants()
                 product_page.add_to_cart()
-            except AssertionError as error:
-                if "unavailable" not in str(error).lower():
-                    raise
+            except (AssertionError, PlaywrightTimeoutError) as error:
+                if not product_page.is_product_unavailable():
+                    logger.error("Product was not added to cart: %s", error)
+                    pytest.fail("Product was not added to cart")
 
-                logger.warning("Skipping product %s: %s", index, error)
+                logger.warning("Skipping unavailable product %s", index)
                 allure.attach(
-                    str(error),
+                    "Product is unavailable",
                     name=f"product_{index}_not_added",
                     attachment_type=allure.attachment_type.TEXT,
                 )
@@ -52,6 +52,36 @@ def add_items_to_cart(page: Page, product_page: ProductPage, product_urls: list[
             page.goto(search_page_url, wait_until="domcontentloaded")
 
 
+def assert_cart_total_not_exceeds(cart_page: CartPage, budget_per_item: float, items_count: int) -> None:
+    logger.info(
+        "Opening cart before validating total. budget_per_item=%s, items_count=%s",
+        budget_per_item,
+        items_count,
+    )
+    try:
+        cart_page.open_cart()
+    except AssertionError:
+        pytest.fail("Cart page did not load", pytrace=False)
+
+    actual_cart_total = cart_page.get_cart_total()
+    maximum_allowed_total = budget_per_item * items_count
+    logger.info(
+        "Cart total validation: actual_cart_total=%s, maximum_allowed_total=%s",
+        actual_cart_total,
+        maximum_allowed_total,
+    )
+
+    cart_page.save_screenshot("cart_summary")
+
+    if actual_cart_total > maximum_allowed_total:
+        logger.error(
+            "Cart total exceeds budget. actual_cart_total=%s, maximum_allowed_total=%s",
+            actual_cart_total,
+            maximum_allowed_total,
+        )
+        pytest.fail("Cart total exceeds budget", pytrace=False)
+
+
 @allure.feature("eBay shopping")
 @allure.story("Search and add products under budget")
 def test_ebay_purchase_flow(page: Page, test_data: dict[str, Any]) -> None:
@@ -60,35 +90,39 @@ def test_ebay_purchase_flow(page: Page, test_data: dict[str, Any]) -> None:
     max_price = float(test_data["max_price"])
     items_limit = int(test_data["items_limit"])
 
-    home_page = HomePage(page)
-    search_results_page = SearchResultsPage(page)
+    products_page = ProductsPage(page)
     product_page = ProductPage(page)
     cart_page = CartPage(page)
 
     with allure.step("Open eBay"):
         logger.info("Opening eBay: %s", base_url)
-        home_page.navigate(base_url)
+        products_page.navigate(base_url)
 
-    with allure.step("Continue as guest"):
-        logger.info("Continuing as guest")
-        home_page.authenticate_as_guest()
 
     with allure.step(f"Search for {search_query} and collect products under {max_price}"):
         logger.info("Searching query='%s', max_price=%s, limit=%s", search_query, max_price, items_limit)
-        product_urls = search_results_page.search_items_by_name_under_price(query=search_query, max_price=max_price, limit=items_limit)
+        product_urls = products_page.search_items_by_name_under_price(query=search_query, max_price=max_price, limit=items_limit)
         logger.info("Collected %s product URLs", len(product_urls))
 
-    if not product_urls:
-        skip_reason = f"No matching products found for query='{search_query}', max_price={max_price}, limit={items_limit}"
-        logger.warning(skip_reason)
-        pytest.skip(skip_reason)
+    with allure.step("Validate collected product URLs"):
+        logger.info("Validating collected product URLs: %s", product_urls)
 
-    add_items_to_cart(page=page, product_page=product_page, product_urls=product_urls)
-    time.sleep(10)
+        if not product_urls:
+            skip_reason = f"No matching products found for query='{search_query}', max_price={max_price}, limit={items_limit}"
+            logger.warning(skip_reason)
+            pytest.skip(skip_reason)
+        logger.info("Collected product URLs: %s", product_urls)
+
+
+    with allure.step("Add items to cart"):
+        logger.info("Adding items to cart: %s", product_urls)
+        add_items_to_cart(page=page, product_page=product_page, product_urls=product_urls)
+        logger.info("Items added to cart successfully")
+
 
     with allure.step("Validate cart total"):
         logger.info("Validating cart total with budget_per_item=%s, items_count=%s", max_price, len(product_urls))
-        cart_page.assert_cart_total_not_exceeds(budget_per_item=max_price, items_count=len(product_urls))
+        assert_cart_total_not_exceeds(cart_page=cart_page, budget_per_item=max_price, items_count=len(product_urls))
 
     with allure.step("Attach cart screenshot"):
         cart_screenshot = Path("screenshots/cart_summary.png")

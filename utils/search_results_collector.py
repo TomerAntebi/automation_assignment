@@ -3,79 +3,77 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import Locator
 
-from utils.price_parser import PriceParser
+from utils.price_parser import parse_price
 
 
-PRICE_XPATH = "xpath=.//*[contains(@class, 'price')]"
+PRODUCT_PRICE_XPATH = "xpath=.//*[contains(@class, 'price')]"
 PRODUCT_LINK_XPATH = "xpath=.//a[contains(@href, '/itm/')]"
-ITEM_ID_PATTERN = re.compile(r"/itm/(?:[^/]+/)?(\d{9,})")
+EBAY_ITEM_ID_PATTERN = re.compile(r"/itm/(?:[^/]+/)?(\d{9,})")
 
 
 class SearchResultsCollector:
-    def __init__(self, result_items: Locator) -> None:
-        self.result_items = result_items
+    def __init__(self, product_cards: Locator) -> None:
+        self.product_cards = product_cards
 
-    def collect_current_page(
+    def collect_product_urls_from_current_page(
         self,
-        urls: list[str],
-        seen: set[str],
-        max_price: float,
-        limit: int,
+        collected_product_urls: list[str],
+        maximum_price: float,
+        product_limit: int,
     ) -> None:
-        count = self.result_items.count()
+        product_card_count = self.product_cards.count()
 
-        for i in range(count):
-            item = self.result_items.nth(i)
+        for card_index in range(product_card_count):
+            product_card = self.product_cards.nth(card_index)
 
-            product = self._extract_product(item, max_price)
-            if not product or product in seen:
+            product_url = self._extract_valid_product_url(product_card, maximum_price)
+            if not product_url or product_url in collected_product_urls:
                 continue
 
-            urls.append(product)
-            seen.add(product)
+            collected_product_urls.append(product_url)
 
-            if len(urls) >= limit:
+            if len(collected_product_urls) >= product_limit:
                 return
 
-    def _extract_product(self, item: Locator, max_price: float) -> str | None:
-        text = item.text_content().lower() or ""
-        if "sponsored" in text:
+    def _extract_valid_product_url(self, product_card: Locator, maximum_price: float) -> str | None:
+        product_card_text = product_card.text_content().lower() or ""
+        if "sponsored" in product_card_text:
             return None
 
-        price = self._get_price(item)
-        if price is None or price > max_price:
+        product_price = self._extract_product_price(product_card)
+        if product_price is None or product_price > maximum_price:
             return None
 
-        return self._get_valid_product_url(item)
+        return self._extract_ebay_product_url(product_card)
 
 
-    def _get_price(self, item: Locator) -> float | None:
-        locator = item.locator(PRICE_XPATH).first
-        text = locator.text_content()
+    def _extract_product_price(self, product_card: Locator) -> float | None:
+        price_locator = product_card.locator(PRODUCT_PRICE_XPATH).first
+        price_text = price_locator.text_content()
 
-        if not text:
+        if not price_text:
             return None
 
         try:
-            return PriceParser.parse(text)
+            return parse_price(price_text)
         except ValueError:
             return None
 
-    def _get_valid_product_url(self, item: Locator) -> str | None:
-        locator = item.locator(PRODUCT_LINK_XPATH).first
-        url = locator.get_attribute("href")
+    def _extract_ebay_product_url(self, product_card: Locator) -> str | None:
+        link_locator = product_card.locator(PRODUCT_LINK_XPATH).first
+        raw_product_url = link_locator.get_attribute("href")
 
-        if not url:
+        if not raw_product_url:
             return None
 
-        parsed = urlparse(url)
+        parsed_url = urlparse(raw_product_url)
 
         if not (
-            parsed.scheme in {"http", "https"}
-            and parsed.netloc.endswith("ebay.com")
-            and "/itm/" in parsed.path
-            and ITEM_ID_PATTERN.search(parsed.path)
+            parsed_url.scheme in {"http", "https"}
+            and parsed_url.netloc.endswith("ebay.com")
+            and "/itm/" in parsed_url.path
+            and EBAY_ITEM_ID_PATTERN.search(parsed_url.path)
         ):
             return None
 
-        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        return f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"

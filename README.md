@@ -2,23 +2,9 @@
 
 ## Overview
 
-This project implements an end-to-end automation scenario for eBay.
+This project contains a Python Playwright end-to-end test for an eBay purchase flow.
 
-The test searches for products by name, applies a maximum price filter, collects product URLs, adds available products to the cart, and validates that the cart item total does not exceed the configured budget.
-
-## Assignment Requirements Covered
-
-- Playwright automation with Python
-- Object Oriented Programming
-- Page Object Model
-- Data-driven input from JSON
-- Allure reporting
-- Product search with max price condition
-- Paging support when fewer results are found on the current page
-- Random available variant selection
-- Add items to cart flow
-- Cart total validation
-- Screenshots and runtime logs
+The test opens eBay, searches for products under a configured maximum price, collects product URLs, adds available products to the cart, and validates that the cart total does not exceed the configured budget.
 
 ## Technologies
 
@@ -37,12 +23,12 @@ data/
 
 pages/
   base_page.py
-  home_page.py
-  search_results_page.py
+  products_page.py
   product_page.py
   cart_page.py
 
 utils/
+  assertions.py
   price_parser.py
   search_results_collector.py
   variant_handler.py
@@ -64,54 +50,63 @@ ReadMeAIBugs.md
 
 ## Architecture
 
-The project follows the Page Object Model and keeps responsibilities separated:
+The project uses a small Page Object Model:
 
-- `HomePage` handles opening eBay and continuing as guest.
-- `SearchResultsPage` handles search and filter URL building.
-- `SearchResultsCollector` collects product URLs from search result pages.
-- `ProductPage` opens products, selects variants, and adds items to the cart.
-- `VariantHandler` selects available eBay listbox variants.
-- `CartPage` reads and validates the cart item total.
-- `PriceParser` extracts numeric prices from UI text.
+- `BasePage` stores the shared Playwright `page`, base URL, navigation, and screenshot behavior.
+- `ProductsPage` builds the eBay search URL, navigates search results, and collects product URLs.
+- `ProductPage` opens a product, selects variants, adds the product to the cart, and exposes unavailable-product state.
+- `CartPage` opens the cart and reads the cart total.
 
-The test file owns the end-to-end flow, Allure steps, logging, screenshots, and final assertions.
+Utility modules keep parsing and selection logic outside the page objects:
+
+- `assertions.py` wraps selected Playwright assertions with short error messages.
+- `search_results_collector.py` extracts valid eBay product URLs from result cards.
+- `price_parser.py` parses numeric prices from UI text.
+- `variant_handler.py` selects available product variants.
+
+The test file owns the end-to-end scenario, Allure steps, logging, screenshots, and final test assertions.
 
 ## Main Test Flow
 
 1. Open eBay.
-2. Continue as guest.
-3. Search for the configured product query.
-4. Apply max price and Buy It Now filters.
-5. Collect up to `items_limit` product URLs.
-6. Open each product page.
-7. Select required variants randomly from available options.
-8. Click `Add to cart`.
-9. Validate that the cart item total does not exceed:
+2. Search for products using `search_query`, `max_price`, and `items_limit` from `data/test_data.json`.
+3. Validate that at least one product URL was collected, otherwise skip the test.
+4. Open each collected product URL.
+5. Select required product variants.
+6. Add available products to the cart.
+7. Skip products that become unavailable.
+8. Save screenshots for successfully added products.
+9. Validate that the cart total does not exceed:
 
    ```text
    max_price * number_of_collected_urls
    ```
 
-10. Attach screenshots and Allure report artifacts.
+10. Attach the cart screenshot to the Allure report.
 
 ## Test Data
 
-The test is data-driven. Input is stored in `data/test_data.json`:
+The test input is stored in `data/test_data.json`:
 
 ```json
 {
   "base_url": "https://www.ebay.com",
-  "search_query": "puma shoes",
-  "max_price": 400,
-  "items_limit": 2
+  "search_query": "",
+  "max_price": 100,
+  "items_limit": 1
 }
 ```
 
-## Prerequisites
+Update `search_query`, `max_price`, and `items_limit` to control the products collected by the test.
 
-- Python 3.11 or newer
-- Chromium installed through Playwright
-- Allure command-line tool to open reports locally
+## Pytest Fixtures
+
+`tests/conftest.py` provides:
+
+- `test_data`: loads `data/test_data.json`.
+- `browser_context`: creates a Playwright browser context with `en-US` locale and `1440x900` viewport.
+- `page`: creates and closes a Playwright page for each test.
+- `pytest_runtest_makereport`: logs passed, skipped, and failed test results.
 
 ## Installation
 
@@ -128,13 +123,18 @@ playwright install chromium
 pytest
 ```
 
-Run with visible browser:
+Run with a visible browser:
 
 ```bash
 pytest --headed
 ```
 
-The project enables live pytest logs through `pytest.ini`.
+`pytest.ini` configures:
+
+- test discovery under `tests`
+- verbose test output
+- Allure result output to `reports/allure-results`
+- live CLI logs at `INFO` level
 
 ## Allure Report
 
@@ -144,7 +144,7 @@ Pytest writes Allure results to:
 reports/allure-results
 ```
 
-Open the report:
+Open the report locally:
 
 ```bash
 allure serve reports/allure-results
@@ -152,22 +152,23 @@ allure serve reports/allure-results
 
 ## Screenshots And Logs
 
-- Product screenshots are saved after successful add-to-cart actions.
-- Cart screenshot is attached during final cart validation.
-- Pytest logs show search input, collected URLs count, skipped products, added products, and final test status.
+- Successful add-to-cart product screenshots are saved under `screenshots/`.
+- The final cart screenshot is saved as `screenshots/cart_summary.png`.
+- Screenshots are attached to the Allure report.
+- Logs include search parameters, collected URL count, unavailable products, added products, cart total values, and test status.
 
 ## Assumptions
 
-- Guest mode is used.
-- No real login credentials are required.
-- The cart item total is validated without shipping costs.
-- No currency conversion is performed.
-- Variant selection uses eBay's visible listbox dropdown.
-- Some products can become unavailable between search collection and add-to-cart.
+- The flow runs as a guest user.
+- No login credentials are required.
+- Cart validation uses the item total visible in the cart.
+- Shipping, taxes, checkout, and payment are not validated.
+- Product prices and availability can change because eBay is a live external site.
+- Some products may become unavailable after being collected from search results.
 
 ## Limitations
 
-- eBay is a live external website, so DOM structure, prices, experiments, dialogs, and product availability may change.
-- eBay may request human verification. This should be treated as an external blocker, not an automation failure.
-- The test does not validate checkout, payment, shipping address, taxes, product titles, or inventory.
-- The test is intended for an automation assignment scenario, not production monitoring of eBay.
+- eBay DOM structure, experiments, prices, and availability may change.
+- eBay may show human verification or regional dialogs.
+- Variant selection depends on visible eBay listbox controls.
+- The test is intended for an automation assignment, not production monitoring.

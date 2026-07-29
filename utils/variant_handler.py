@@ -10,54 +10,52 @@ VARIANT_CONTROL_SELECTOR = "xpath=.//button[contains(@class, 'listbox-button__co
 VARIANT_OPTION_SELECTOR = "xpath=.//*[@role='option']"
 
 
-class VariantHandler:
-    def __init__(self, variant_groups: Locator) -> None:
-        self.variant_groups = variant_groups
+def select_variants(variant_groups: Locator) -> None:
+    variant_groups_length = variant_groups.count()
+    for index in range(variant_groups_length):
+        variant_group = variant_groups.nth(index)
 
-    def select_variants(self) -> None:
-        variant_groups_length = self.variant_groups.count()
-        for index in range(variant_groups_length):
-            variant_group = self.variant_groups.nth(index)
+        if not variant_group.is_visible():
+            continue
 
-            if not variant_group.is_visible():
-                continue
+        variant_control = variant_group.locator(VARIANT_CONTROL_SELECTOR).first
 
-            variant_control = variant_group.locator(VARIANT_CONTROL_SELECTOR).first
+        if not variant_control.is_visible():
+            continue
 
-            if not variant_control.is_visible():
-                continue
+        variant_control.click()
 
-            variant_control.click()
+        options = variant_group.locator(VARIANT_OPTION_SELECTOR)
+        expect(options.first).to_be_visible()
+        valid_options = _get_valid_options(options)
 
-            options = variant_group.locator(VARIANT_OPTION_SELECTOR)
-            expect(options.first).to_be_visible()
-            valid_options = self._get_valid_options(options)
+        if not valid_options:
+            continue
 
-            if not valid_options:
-                continue
+        random.choice(valid_options).click()
 
-            random.choice(valid_options).click()
 
-    def _get_valid_options(self, options: Locator) -> list[Locator]:
-        valid_options: list[Locator] = []
-        options_length = options.count()
-        for index in range(options_length):
-            option = options.nth(index)
+def _get_valid_options(options: Locator) -> list[Locator]:
+    valid_options: list[Locator] = []
+    options_length = options.count()
+    for index in range(options_length):
+        option = options.nth(index)
 
-            if not self._is_valid_option(option):
-                continue
+        if not _is_valid_option(option):
+            continue
 
-            valid_options.append(option)
+        valid_options.append(option)
 
-        return valid_options
+    return valid_options
 
-    def _is_valid_option(self, option: Locator) -> bool:
-        option_text = option.text_content() or ""
 
-        if option.is_disabled() or option.get_attribute("aria-disabled") == "true":
-            return False
+def _is_valid_option(option: Locator) -> bool:
+    option_text = option.text_content() or ""
 
-        if INVALID_TEXT_PATTERN.search(option_text):
-            return False
+    if option.is_disabled() or option.get_attribute("aria-disabled") == "true":
+        return False
 
-        return True
+    if INVALID_TEXT_PATTERN.search(option_text):
+        return False
+
+    return True

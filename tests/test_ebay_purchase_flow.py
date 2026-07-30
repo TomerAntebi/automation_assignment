@@ -1,5 +1,4 @@
 import logging
-import time 
 from pathlib import Path
 from typing import Any
 
@@ -15,33 +14,52 @@ from pages.products_page import ProductsPage
 logger = logging.getLogger(__name__)
 
 
-def add_items_to_cart(page: Page, product_page: ProductPage, product_urls: list[str]) -> None:
+def add_items_to_cart(
+    page: Page,
+    product_page: ProductPage,
+    product_urls: list[str],
+) -> int:
     search_page_url = page.url
+    added_items = 0
 
     for index, product_url in enumerate(product_urls, start=1):
         with allure.step(f"Add product {index} to cart"):
-            logger.info("Opening product %s/%s: %s", index, len(product_urls), product_url)
+            logger.info(
+                "Opening product %s/%s: %s",
+                index,
+                len(product_urls),
+                product_url,
+            )
 
             try:
                 product_page.open_product(product_url)
                 product_page.select_variants()
                 product_page.add_to_cart()
+
             except (AssertionError, PlaywrightTimeoutError) as error:
-                if not product_page.is_product_unavailable():
-                    logger.error("Product was not added to cart: %s", error)
-                    pytest.fail("Product was not added to cart")
+                if product_page.is_product_unavailable():
+                    logger.warning("Skipping unavailable product %s", index)
 
-                logger.warning("Skipping unavailable product %s", index)
-                allure.attach(
-                    "Product is unavailable",
-                    name=f"product_{index}_not_added",
-                    attachment_type=allure.attachment_type.TEXT,
-                )
-                page.goto(search_page_url, wait_until="domcontentloaded")
-                continue
+                    allure.attach(
+                        "Product is unavailable",
+                        name=f"product_{index}_skipped",
+                        attachment_type=allure.attachment_type.TEXT,
+                    )
 
-            screenshot_path = product_page.save_screenshot(f"added_product_{index}")
-            logger.info("Product %s added to cart successfully", index)
+                    page.goto(search_page_url, wait_until="domcontentloaded")
+                    continue
+
+                raise AssertionError(
+                    f"Failed to add product {index} to cart: {error}"
+                ) from error
+
+            added_items += 1
+
+            screenshot_path = product_page.save_screenshot(
+                f"added_product_{index}"
+            )
+
+            logger.info("Product %s added successfully", index)
 
             allure.attach.file(
                 str(screenshot_path),
@@ -51,42 +69,48 @@ def add_items_to_cart(page: Page, product_page: ProductPage, product_urls: list[
 
             page.goto(search_page_url, wait_until="domcontentloaded")
 
+    return added_items
 
-def assert_cart_total_not_exceeds(cart_page: CartPage, budget_per_item: float, items_count: int) -> None:
+
+def assert_cart_total_not_exceeds(
+    cart_page: CartPage,
+    budget_per_item: float,
+    items_count: int,
+) -> None:
     logger.info(
-        "Opening cart before validating total. budget_per_item=%s, items_count=%s",
+        "Opening cart. budget_per_item=%s, items_count=%s",
         budget_per_item,
         items_count,
     )
+
     try:
         cart_page.open_cart()
-    except AssertionError:
-        pytest.fail("Cart page did not load", pytrace=False)
+    except AssertionError as error:
+        pytest.fail(f"Cart page did not load: {error}", pytrace=False)
 
-    actual_cart_total = cart_page.get_cart_total()
-    maximum_allowed_total = budget_per_item * items_count
+    actual_total = cart_page.get_cart_total()
+    expected_max = budget_per_item * items_count
+
     logger.info(
-        "Cart total validation: actual_cart_total=%s, maximum_allowed_total=%s",
-        actual_cart_total,
-        maximum_allowed_total,
+        "Cart total: actual=%s, expected_max=%s",
+        actual_total,
+        expected_max,
     )
 
     cart_page.save_screenshot("cart_summary")
 
-    if actual_cart_total > maximum_allowed_total:
-        logger.error(
-            "Cart total exceeds budget. actual_cart_total=%s, maximum_allowed_total=%s",
-            actual_cart_total,
-            maximum_allowed_total,
+    if actual_total > expected_max:
+        pytest.fail(
+            f"Cart total {actual_total} exceeds allowed {expected_max}",
+            pytrace=False,
         )
-        pytest.fail("Cart total exceeds budget", pytrace=False)
 
 
 @allure.feature("eBay shopping")
 @allure.story("Search and add products under budget")
 def test_ebay_purchase_flow(page: Page, test_data: dict[str, Any]) -> None:
-    base_url = str(test_data["base_url"])
-    search_query = str(test_data["search_query"])
+    base_url = test_data["base_url"]
+    search_query = test_data["search_query"]
     max_price = float(test_data["max_price"])
     items_limit = int(test_data["items_limit"])
 
@@ -95,41 +119,56 @@ def test_ebay_purchase_flow(page: Page, test_data: dict[str, Any]) -> None:
     cart_page = CartPage(page)
 
     with allure.step("Open eBay"):
-        logger.info("Opening eBay: %s", base_url)
+        logger.info("Opening site: %s", base_url)
         products_page.navigate(base_url)
 
+    with allure.step("Search products"):
+        logger.info(
+            "Searching query='%s', max_price=%s, limit=%s",
+            search_query,
+            max_price,
+            items_limit,
+        )
 
-    with allure.step(f"Search for {search_query} and collect products under {max_price}"):
-        logger.info("Searching query='%s', max_price=%s, limit=%s", search_query, max_price, items_limit)
-        product_urls = products_page.search_items_by_name_under_price(query=search_query, max_price=max_price, limit=items_limit)
-        logger.info("Collected %s product URLs", len(product_urls))
+        product_urls = products_page.search_items_by_name_under_price(
+            query=search_query,
+            max_price=max_price,
+            limit=items_limit,
+        )
 
-    with allure.step("Validate collected product URLs"):
-        logger.info("Validating collected product URLs: %s", product_urls)
-
+    with allure.step("Validate results"):
         if not product_urls:
-            skip_reason = f"No matching products found for query='{search_query}', max_price={max_price}, limit={items_limit}"
-            logger.warning(skip_reason)
-            pytest.skip(skip_reason)
-        logger.info("Collected product URLs: %s", product_urls)
-
+            message = (
+                f"No products found for query='{search_query}', "
+                f"max_price={max_price}, limit={items_limit}"
+            )
+            logger.warning(message)
+            pytest.skip(message)
 
     with allure.step("Add items to cart"):
-        logger.info("Adding items to cart: %s", product_urls)
-        add_items_to_cart(page=page, product_page=product_page, product_urls=product_urls)
-        logger.info("Items added to cart successfully")
+        added_count = add_items_to_cart(
+            page=page,
+            product_page=product_page,
+            product_urls=product_urls,
+        )
 
+        if added_count == 0:
+            pytest.fail("No products were added to cart")
+
+        logger.info("Added %s/%s products", added_count, len(product_urls))
 
     with allure.step("Validate cart total"):
-        logger.info("Validating cart total with budget_per_item=%s, items_count=%s", max_price, len(product_urls))
-        assert_cart_total_not_exceeds(cart_page=cart_page, budget_per_item=max_price, items_count=len(product_urls))
+        assert_cart_total_not_exceeds(
+            cart_page=cart_page,
+            budget_per_item=max_price,
+            items_count=added_count,
+        )
 
     with allure.step("Attach cart screenshot"):
-        cart_screenshot = Path("screenshots/cart_summary.png")
-        logger.info("Attaching cart screenshot: %s", cart_screenshot)
+        screenshot_path = Path("screenshots/cart_summary.png")
 
         allure.attach.file(
-            str(cart_screenshot),
+            str(screenshot_path),
             name="cart_summary",
             attachment_type=allure.attachment_type.PNG,
         )
